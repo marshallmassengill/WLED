@@ -824,6 +824,207 @@ static const char _data_FX_MODE_HYPER_SPARKLE[] PROGMEM = "Sparkle+@!,!,,,,,Over
 
 
 /*
+ * Fireflies effect - simulates fireflies with species-specific flash patterns
+ * Patterns based on real firefly bioluminescence behavior
+ */
+uint16_t mode_fireflies(void) {
+  // Firefly data structure
+  struct Firefly {
+    uint16_t position;     // LED position
+    uint8_t brightness;    // Current brightness (0-255)
+    uint8_t state;         // Current state in pattern (0=off, 1-4=active states)
+    uint16_t timer;        // Timing within current state
+    uint8_t stateMax;      // Max timer value for current state (varies by species)
+  };
+
+  // Calculate max fireflies based on intensity (1-32 fireflies)
+  uint8_t maxFireflies = 1 + (SEGMENT.intensity >> 3);
+
+  // Allocate data for fireflies
+  unsigned dataSize = sizeof(Firefly) * maxFireflies;
+  if (!SEGENV.allocateData(dataSize)) return mode_static();
+
+  Firefly* fireflies = reinterpret_cast<Firefly*>(SEGENV.data);
+
+  // Initialize on first call
+  if (SEGENV.call == 0) {
+    SEGMENT.fill(BLACK);
+    for (uint8_t i = 0; i < maxFireflies; i++) {
+      fireflies[i].position = 0;
+      fireflies[i].brightness = 0;
+      fireflies[i].state = 0;
+      fireflies[i].timer = 0;
+      fireflies[i].stateMax = 0;
+    }
+  }
+
+  // Gradual fade out for smooth trails
+  SEGMENT.fade_out(245);
+
+  // Speed affects timing (higher speed = faster patterns)
+  uint16_t speedFactor = 10 + (255 - SEGMENT.speed);
+
+  // Activity level (custom1) affects spawn probability
+  uint8_t activityLevel = SEGMENT.custom1;
+
+  // Species selection (custom2) - 0-31
+  uint8_t species = SEGMENT.custom2 & 0x1F;
+
+  // Get firefly color from segment
+  uint32_t fireflyColor = SEGCOLOR(0);
+
+  // Update each firefly
+  for (uint8_t i = 0; i < maxFireflies; i++) {
+    Firefly& ff = fireflies[i];
+
+    if (ff.state == 0) {
+      // Firefly is off, chance to spawn based on activity
+      if (hw_random8() < activityLevel) {
+        ff.position = hw_random16(SEGLEN);
+        ff.brightness = 0;
+        ff.state = 1;
+        ff.timer = 0;
+
+        // Set state timings based on species
+        switch (species) {
+          case 0: // Eastern Firefly (Photinus pyralis) - single quick flash
+            ff.stateMax = speedFactor >> 2; // Quick fade in
+            break;
+          case 1: // Photuris - double flash pattern
+            ff.stateMax = speedFactor >> 3; // Very quick fade in
+            break;
+          case 2: // Synchronous - slow steady glow
+            ff.stateMax = speedFactor; // Slow fade in
+            break;
+          case 3: // Rapid blinker - multiple quick flashes
+            ff.stateMax = speedFactor >> 4; // Very fast fade in
+            break;
+          default: // Generic random
+            ff.stateMax = (speedFactor >> 2) + hw_random8(speedFactor >> 2);
+            break;
+        }
+      }
+    } else {
+      // Firefly is active, process pattern
+      ff.timer++;
+
+      if (ff.timer >= ff.stateMax) {
+        ff.timer = 0;
+        ff.state++;
+
+        // Species-specific state machine
+        switch (species) {
+          case 0: // Eastern Firefly: fade in (1) -> hold (2) -> fade out (3) -> pause (4) -> off (0)
+            switch (ff.state) {
+              case 2: ff.stateMax = speedFactor >> 3; break; // Hold
+              case 3: ff.stateMax = speedFactor >> 2; break; // Fade out
+              case 4: ff.stateMax = speedFactor * 3; break;  // Long pause
+              case 5: ff.state = 0; break; // Reset to off
+            }
+            break;
+
+          case 1: // Photuris: fade in (1) -> hold (2) -> fade out (3) -> pause (4) -> fade in (5) -> hold (6) -> fade out (7) -> long pause (8) -> off
+            switch (ff.state) {
+              case 2: ff.stateMax = speedFactor >> 4; break; // Brief hold
+              case 3: ff.stateMax = speedFactor >> 3; break; // Quick fade out
+              case 4: ff.stateMax = speedFactor >> 2; break; // Short pause
+              case 5: ff.stateMax = speedFactor >> 3; break; // Second fade in
+              case 6: ff.stateMax = speedFactor >> 4; break; // Brief hold
+              case 7: ff.stateMax = speedFactor >> 3; break; // Fade out
+              case 8: ff.stateMax = speedFactor * 3; break;  // Long pause
+              case 9: ff.state = 0; break; // Reset
+            }
+            break;
+
+          case 2: // Synchronous: slow fade in (1) -> long hold (2) -> slow fade out (3) -> pause (4) -> off
+            switch (ff.state) {
+              case 2: ff.stateMax = speedFactor; break;     // Long hold
+              case 3: ff.stateMax = speedFactor; break;     // Slow fade out
+              case 4: ff.stateMax = speedFactor * 2; break; // Medium pause
+              case 5: ff.state = 0; break; // Reset
+            }
+            break;
+
+          case 3: // Rapid blinker: multiple quick flashes
+            switch (ff.state) {
+              case 2: case 4: case 6: case 8: // Flash holds
+                ff.stateMax = speedFactor >> 5; break;
+              case 3: case 5: case 7: // Quick fade outs
+                ff.stateMax = speedFactor >> 4; break;
+              case 9: ff.stateMax = speedFactor * 2; break; // Pause
+              case 10: ff.state = 0; break; // Reset
+            }
+            break;
+
+          default: // Generic random pattern
+            if (ff.state < 4) {
+              ff.stateMax = speedFactor >> 2;
+            } else {
+              ff.state = 0;
+            }
+            break;
+        }
+      }
+
+      // Calculate brightness based on state
+      if (ff.state > 0) {
+        uint8_t progress = (ff.stateMax > 0) ? (uint16_t)ff.timer * 255 / ff.stateMax : 0;
+
+        // Different brightness curves for different states
+        switch (species) {
+          case 0: // Eastern
+            if (ff.state == 1) ff.brightness = progress; // Fade in
+            else if (ff.state == 2) ff.brightness = 255; // Hold
+            else if (ff.state == 3) ff.brightness = 255 - progress; // Fade out
+            else ff.brightness = 0; // Pause
+            break;
+
+          case 1: // Photuris double flash
+            if (ff.state == 1 || ff.state == 5) ff.brightness = progress; // Fade in
+            else if (ff.state == 2 || ff.state == 6) ff.brightness = 255; // Hold
+            else if (ff.state == 3 || ff.state == 7) ff.brightness = 255 - progress; // Fade out
+            else ff.brightness = 0; // Pause
+            break;
+
+          case 2: // Synchronous smooth
+            if (ff.state == 1) ff.brightness = ease8InOutQuad(progress); // Smooth fade in
+            else if (ff.state == 2) ff.brightness = 255; // Hold
+            else if (ff.state == 3) ff.brightness = 255 - ease8InOutQuad(progress); // Smooth fade out
+            else ff.brightness = 0; // Pause
+            break;
+
+          case 3: // Rapid blinker
+            if (ff.state == 1 || ff.state == 3 || ff.state == 5 || ff.state == 7)
+              ff.brightness = progress; // Quick fade in
+            else if (ff.state == 2 || ff.state == 4 || ff.state == 6 || ff.state == 8)
+              ff.brightness = 255; // Hold
+            else
+              ff.brightness = 0; // Pause/off
+            break;
+
+          default: // Generic
+            if (ff.state == 1) ff.brightness = progress;
+            else if (ff.state == 2) ff.brightness = 255;
+            else if (ff.state == 3) ff.brightness = 255 - progress;
+            else ff.brightness = 0;
+            break;
+        }
+      }
+    }
+
+    // Draw firefly if visible
+    if (ff.brightness > 0) {
+      uint32_t color = color_fade(fireflyColor, ff.brightness, false);
+      SEGMENT.setPixelColor(ff.position, color);
+    }
+  }
+
+  return FRAMETIME;
+}
+static const char _data_FX_MODE_FIREFLIES[] PROGMEM = "Fireflies@Speed,Fireflies,Activity,Species;!;;1";
+
+
+/*
  * Strobe effect with different strobe count and pause, controlled by speed.
  */
 uint16_t mode_multi_strobe(void) {
@@ -10866,6 +11067,7 @@ void WS2812FX::setupEffectData() {
   addEffect(FX_MODE_RIPPLE, &mode_ripple, _data_FX_MODE_RIPPLE);
   addEffect(FX_MODE_TWINKLEFOX, &mode_twinklefox, _data_FX_MODE_TWINKLEFOX);
   addEffect(FX_MODE_TWINKLECAT, &mode_twinklecat, _data_FX_MODE_TWINKLECAT);
+  addEffect(FX_MODE_FIREFLIES, &mode_fireflies, _data_FX_MODE_FIREFLIES);
   addEffect(FX_MODE_HALLOWEEN_EYES, &mode_halloween_eyes, _data_FX_MODE_HALLOWEEN_EYES);
   addEffect(FX_MODE_STATIC_PATTERN, &mode_static_pattern, _data_FX_MODE_STATIC_PATTERN);
   addEffect(FX_MODE_TRI_STATIC_PATTERN, &mode_tri_static_pattern, _data_FX_MODE_TRI_STATIC_PATTERN);
