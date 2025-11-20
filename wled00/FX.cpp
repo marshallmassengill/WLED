@@ -826,6 +826,21 @@ static const char _data_FX_MODE_HYPER_SPARKLE[] PROGMEM = "Sparkle+@!,!,,,,,Over
 /*
  * Fireflies effect - simulates fireflies with species-specific flash patterns
  * Patterns based on real firefly bioluminescence behavior
+ *
+ * Species patterns (0-31):
+ *  0: Eastern Firefly (Photinus pyralis) - Single quick flash
+ *  1: Photuris - Double flash pattern
+ *  2: Synchronous - Slow steady glow
+ *  3: Rapid blinker - Multiple quick flashes
+ *  4: J-curve - Slow rise, instant drop
+ *  5: Triple flash - Three flashes in succession
+ *  6: Long pulse - Extended glow
+ *  7: Morse code - Dot-dot-dash pattern
+ *  8: Flicker/shimmer - Random brightness variations
+ *  9: Sawtooth - Symmetric rise and fall
+ * 10: Stuttered burst - Machine gun effect (5 ultra-fast flashes)
+ * 11: Pulse wave - Instant on, slow fade
+ * 12-31: Generic random pattern
  */
 uint16_t mode_fireflies(void) {
   // Firefly data structure
@@ -899,6 +914,30 @@ uint16_t mode_fireflies(void) {
           case 3: // Rapid blinker - multiple quick flashes
             ff.stateMax = speedFactor >> 4; // Very fast fade in
             break;
+          case 4: // J-curve - slow rise, quick drop
+            ff.stateMax = speedFactor; // Slow fade in
+            break;
+          case 5: // Triple flash
+            ff.stateMax = speedFactor >> 3; // Quick fade in
+            break;
+          case 6: // Long pulse - extended glow
+            ff.stateMax = speedFactor >> 1; // Medium fade in
+            break;
+          case 7: // Morse code - dot dot dash
+            ff.stateMax = speedFactor >> 4; // Very quick fade in (dot)
+            break;
+          case 8: // Flicker/shimmer - random brightness variations
+            ff.stateMax = speedFactor >> 3; // Quick fade in
+            break;
+          case 9: // Sawtooth - gradual symmetric rise and fall
+            ff.stateMax = speedFactor >> 1; // Medium fade in
+            break;
+          case 10: // Stuttered burst - machine gun effect
+            ff.stateMax = speedFactor >> 5; // Ultra fast fade in
+            break;
+          case 11: // Pulse wave - quick on, slow fade
+            ff.stateMax = speedFactor >> 4; // Very fast fade in
+            break;
           default: // Generic random
             ff.stateMax = (speedFactor >> 2) + hw_random8(speedFactor >> 2);
             break;
@@ -956,6 +995,91 @@ uint16_t mode_fireflies(void) {
             }
             break;
 
+          case 4: // J-curve: slow fade in (1) -> instant drop (2) -> pause (3) -> off
+            switch (ff.state) {
+              case 2: ff.stateMax = speedFactor >> 5; break; // Very quick fade out
+              case 3: ff.stateMax = speedFactor * 2; break;  // Pause
+              case 4: ff.state = 0; break; // Reset
+            }
+            break;
+
+          case 5: // Triple flash: (fade in -> hold -> fade out -> pause) x3 -> long pause -> off
+            switch (ff.state) {
+              case 2: case 5: case 8: // Hold states
+                ff.stateMax = speedFactor >> 4; break;
+              case 3: case 6: case 9: // Fade out states
+                ff.stateMax = speedFactor >> 3; break;
+              case 4: case 7: // Short pauses between flashes
+                ff.stateMax = speedFactor >> 3; break;
+              case 10: ff.stateMax = speedFactor * 2; break; // Long pause
+              case 11: ff.state = 0; break; // Reset
+            }
+            break;
+
+          case 6: // Long pulse: slow fade in (1) -> very long hold (2) -> slow fade out (3) -> pause (4) -> off
+            switch (ff.state) {
+              case 2: ff.stateMax = speedFactor * 2; break;   // Very long hold
+              case 3: ff.stateMax = speedFactor >> 1; break;  // Medium fade out
+              case 4: ff.stateMax = speedFactor * 2; break;   // Long pause
+              case 5: ff.state = 0; break; // Reset
+            }
+            break;
+
+          case 7: // Morse code (dot dot dash): short-pause-short-pause-long-pause
+            switch (ff.state) {
+              case 2: ff.stateMax = speedFactor >> 4; break; // Dot 1 hold
+              case 3: ff.stateMax = speedFactor >> 4; break; // Dot 1 fade out
+              case 4: ff.stateMax = speedFactor >> 3; break; // Pause
+              case 5: ff.stateMax = speedFactor >> 4; break; // Dot 2 fade in
+              case 6: ff.stateMax = speedFactor >> 4; break; // Dot 2 hold
+              case 7: ff.stateMax = speedFactor >> 4; break; // Dot 2 fade out
+              case 8: ff.stateMax = speedFactor >> 3; break; // Pause
+              case 9: ff.stateMax = speedFactor >> 2; break; // Dash fade in
+              case 10: ff.stateMax = speedFactor >> 2; break; // Dash hold
+              case 11: ff.stateMax = speedFactor >> 2; break; // Dash fade out
+              case 12: ff.stateMax = speedFactor * 2; break;  // Long pause
+              case 13: ff.state = 0; break; // Reset
+            }
+            break;
+
+          case 8: // Flicker/shimmer: random brightness variations with multiple states
+            switch (ff.state) {
+              case 2: case 4: case 6: case 8: case 10: // Variable holds with random brightness
+                ff.stateMax = speedFactor >> 4; break;
+              case 3: case 5: case 7: case 9: // Quick transitions
+                ff.stateMax = speedFactor >> 5; break;
+              case 11: ff.stateMax = speedFactor; break; // Pause
+              case 12: ff.state = 0; break; // Reset
+            }
+            break;
+
+          case 9: // Sawtooth: gradual fade in (1) -> gradual fade out (2) -> pause (3) -> off
+            switch (ff.state) {
+              case 2: ff.stateMax = speedFactor >> 1; break; // Gradual fade out (same duration as fade in)
+              case 3: ff.stateMax = speedFactor; break;      // Pause
+              case 4: ff.state = 0; break; // Reset
+            }
+            break;
+
+          case 10: // Stuttered burst: 5 ultra-fast flashes in rapid succession
+            switch (ff.state) {
+              case 2: case 4: case 6: case 8: case 10: // Ultra brief holds
+                ff.stateMax = speedFactor >> 6; break;
+              case 3: case 5: case 7: case 9: // Ultra brief fade outs
+                ff.stateMax = speedFactor >> 6; break;
+              case 11: ff.stateMax = speedFactor * 2; break; // Pause
+              case 12: ff.state = 0; break; // Reset
+            }
+            break;
+
+          case 11: // Pulse wave: instant on (1) -> long slow fade out (2) -> pause (3) -> off
+            switch (ff.state) {
+              case 2: ff.stateMax = speedFactor; break;     // Long slow fade out
+              case 3: ff.stateMax = speedFactor * 2; break; // Pause
+              case 4: ff.state = 0; break; // Reset
+            }
+            break;
+
           default: // Generic random pattern
             if (ff.state < 4) {
               ff.stateMax = speedFactor >> 2;
@@ -1000,6 +1124,75 @@ uint16_t mode_fireflies(void) {
               ff.brightness = 255; // Hold
             else
               ff.brightness = 0; // Pause/off
+            break;
+
+          case 4: // J-curve - slow rise, instant drop
+            if (ff.state == 1) ff.brightness = ease8InOutCubic(progress); // Smooth slow rise
+            else if (ff.state == 2) ff.brightness = 255 - progress; // Quick drop
+            else ff.brightness = 0; // Pause
+            break;
+
+          case 5: // Triple flash
+            if (ff.state == 1 || ff.state == 4 || ff.state == 7)
+              ff.brightness = progress; // Fade in for each flash
+            else if (ff.state == 2 || ff.state == 5 || ff.state == 8)
+              ff.brightness = 255; // Hold
+            else if (ff.state == 3 || ff.state == 6 || ff.state == 9)
+              ff.brightness = 255 - progress; // Fade out
+            else
+              ff.brightness = 0; // Pauses
+            break;
+
+          case 6: // Long pulse
+            if (ff.state == 1) ff.brightness = progress; // Fade in
+            else if (ff.state == 2) ff.brightness = 255; // Long hold
+            else if (ff.state == 3) ff.brightness = 255 - progress; // Fade out
+            else ff.brightness = 0; // Pause
+            break;
+
+          case 7: // Morse code - dot dot dash
+            if (ff.state == 1 || ff.state == 5) ff.brightness = progress; // Dot fade ins
+            else if (ff.state == 2 || ff.state == 6) ff.brightness = 255; // Dot holds
+            else if (ff.state == 3 || ff.state == 7) ff.brightness = 255 - progress; // Dot fade outs
+            else if (ff.state == 9) ff.brightness = progress; // Dash fade in
+            else if (ff.state == 10) ff.brightness = 255; // Dash hold
+            else if (ff.state == 11) ff.brightness = 255 - progress; // Dash fade out
+            else ff.brightness = 0; // Pauses
+            break;
+
+          case 8: // Flicker/shimmer - random brightness variations
+            if (ff.state == 1) ff.brightness = progress; // Initial fade in
+            else if (ff.state == 2 || ff.state == 4 || ff.state == 6 || ff.state == 8 || ff.state == 10) {
+              // Random brightness levels for shimmer effect
+              uint8_t shimmer = 150 + hw_random8(106); // Random between 150-255
+              ff.brightness = shimmer;
+            }
+            else if (ff.state == 3 || ff.state == 5 || ff.state == 7 || ff.state == 9) {
+              // Quick transitions between shimmer levels
+              ff.brightness = 180 + hw_random8(76); // Random between 180-255
+            }
+            else ff.brightness = 0; // Pause
+            break;
+
+          case 9: // Sawtooth - symmetric rise and fall
+            if (ff.state == 1) ff.brightness = progress; // Linear fade in
+            else if (ff.state == 2) ff.brightness = 255 - progress; // Linear fade out
+            else ff.brightness = 0; // Pause
+            break;
+
+          case 10: // Stuttered burst - machine gun flashes
+            if (ff.state == 1 || ff.state == 3 || ff.state == 5 || ff.state == 7 || ff.state == 9)
+              ff.brightness = progress; // Ultra fast fade ins
+            else if (ff.state == 2 || ff.state == 4 || ff.state == 6 || ff.state == 8 || ff.state == 10)
+              ff.brightness = 255; // Ultra brief holds
+            else
+              ff.brightness = 0; // Pause
+            break;
+
+          case 11: // Pulse wave - instant on, slow fade
+            if (ff.state == 1) ff.brightness = 255; // Instant full brightness
+            else if (ff.state == 2) ff.brightness = 255 - progress; // Long slow fade out
+            else ff.brightness = 0; // Pause
             break;
 
           default: // Generic
